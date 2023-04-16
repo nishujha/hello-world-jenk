@@ -1,0 +1,27 @@
+pipeline {
+    agent any
+    stages {
+        stage('Checkout') {
+            steps {
+                git branch: 'main', url: 'https://github.com/your-github-repo/sample-application.git'
+            }
+        }
+        stage('Build') {
+            steps {
+                sh 'mvn clean package'
+            }
+        }
+        stage('Deploy') {
+            steps {
+                withAWS(credentials: 'aws-credentials-id', region: 'us-west-2') {
+                    sh 'aws ec2 create-key-pair --key-name my-key-pair --query KeyMaterial --output text > my-key-pair.pem'
+                    sh 'chmod 400 my-key-pair.pem'
+                    sh 'aws ec2 run-instances --image-id ami-0c55b159cbfafe1f0 --count 1 --instance-type t2.micro --key-name my-key-pair --security-group-ids sg-12345678 --subnet-id subnet-12345678 --associate-public-ip-address --user-data file://userdata.sh'
+                    sh 'aws ec2 describe-instances --filters "Name=instance-state-name,Values=running" --query "Reservations[].Instances[].[PublicIpAddress]" --output text > ip_address.txt'
+                    sh 'scp -o StrictHostKeyChecking=no -i my-key-pair.pem target/sample-application.jar ec2-user@$(cat ip_address.txt):~'
+                    sh 'ssh -o StrictHostKeyChecking=no -i my-key-pair.pem ec2-user@$(cat ip_address.txt) "java -jar sample-application.jar &"'
+                }
+            }
+        }
+    }
+}
